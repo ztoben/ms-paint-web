@@ -2,10 +2,11 @@ import { useState, useRef, useEffect } from 'react'
 import { ThemeProvider } from 'styled-components'
 import { createGlobalStyle } from 'styled-components'
 import original from 'react95/dist/themes/original'
-import { styleReset, MenuList, MenuListItem, Separator, Frame, Button } from 'react95'
+import { styleReset, MenuList, MenuListItem, Separator, Frame, Button, TextInput } from 'react95'
 import ms_sans_serif from 'react95/dist/fonts/ms_sans_serif.woff2'
 import ms_sans_serif_bold from 'react95/dist/fonts/ms_sans_serif_bold.woff2'
 import styled from 'styled-components'
+import { compressToEncodedURIComponent, decompressFromEncodedURIComponent } from 'lz-string'
 
 const GlobalStyles = createGlobalStyle`
   ${styleReset}
@@ -124,12 +125,29 @@ const TitleBarButton = styled(Button)`
 const CloseButton = styled(TitleBarButton)``
 const MaximizeButton = styled(TitleBarButton)``
 
+const ShareButton = styled(Button)`
+  height: 22px;
+  padding: 2px 12px;
+  font-size: 11px;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  gap: 4px;
+`
+
+const MenuItems = styled.div`
+  display: flex;
+  gap: 8px;
+`
+
 const MenuBar = styled.div`
   background: ${({ theme }) => theme.material};
   border-bottom: 2px solid ${({ theme }) => theme.borderDark};
   padding: 2px 4px;
   display: flex;
   gap: 8px;
+  align-items: center;
+  justify-content: space-between;
 `
 
 const MenuItemWrapper = styled.div`
@@ -405,6 +423,18 @@ const DialogButtons = styled.div`
   border-top: 2px solid ${({ theme }) => theme.borderDark};
 `
 
+const ShareLinkRow = styled.div`
+  display: flex;
+  gap: 8px;
+  align-items: center;
+  width: 100%;
+`
+
+const ShareLinkInput = styled(TextInput)`
+  flex: 1;
+  font-size: 11px;
+`
+
 const colors = [
   // Row 1
   '#000000', '#FFFFFF', '#808080', '#C0C0C0', '#800000', '#FF0000', '#808000', '#FFFF00', '#008000', '#00FF00',
@@ -460,6 +490,9 @@ function App() {
   const [selectionImageData, setSelectionImageData] = useState<ImageData | null>(null)
   const [canvasCursor, setCanvasCursor] = useState('crosshair')
   const [showAboutDialog, setShowAboutDialog] = useState(false)
+  const [showShareDialog, setShowShareDialog] = useState(false)
+  const [shareLink, setShareLink] = useState('')
+  const [linkCopied, setLinkCopied] = useState(false)
 
   const canvasRef = useRef<HTMLCanvasElement>(null)
   const selectionCanvasRef = useRef<HTMLCanvasElement>(null)
@@ -516,6 +549,40 @@ function App() {
     ctx.strokeRect(selection.x, selection.y, selection.width, selection.height)
   }, [selection, dashOffset])
 
+  // Load shared canvas from URL hash fragment on mount
+  useEffect(() => {
+    // Parse hash fragment (everything after #)
+    const hash = window.location.hash.substring(1) // Remove the # character
+    if (!hash) return
+
+    const hashParams = new URLSearchParams(hash)
+    const shareId = hashParams.get('share')
+    const sharedData = hashParams.get('data')
+
+    if (shareId && sharedData) {
+      try {
+        // Decompress and parse the shared data
+        const decompressed = decompressFromEncodedURIComponent(sharedData)
+        if (decompressed) {
+          const parsed = JSON.parse(decompressed)
+
+          // Set canvas size if provided
+          if (parsed.width && parsed.height) {
+            setCanvasSize({ width: parsed.width, height: parsed.height })
+          }
+
+          // Store the image data URL with unique share ID so it doesn't overwrite local work
+          if (parsed.image) {
+            localStorage.setItem(`ms-paint-shared-${shareId}`, parsed.image)
+          }
+        }
+      } catch (error) {
+        // Silent fallback - just log to console
+        console.error('Failed to load shared canvas:', error)
+      }
+    }
+  }, [])
+
   useEffect(() => {
     const canvas = canvasRef.current
     if (!canvas) return
@@ -527,23 +594,46 @@ function App() {
     context.lineJoin = 'round'
     contextRef.current = context
 
-    // Try to load saved canvas from localStorage
-    const savedCanvas = localStorage.getItem('ms-paint-canvas')
-    if (savedCanvas) {
+    // Check if we're loading a shared canvas from hash fragment
+    const hash = window.location.hash.substring(1)
+    const hashParams = new URLSearchParams(hash)
+    const shareId = hashParams.get('share')
+
+    let sharedCanvas = null
+    if (shareId) {
+      sharedCanvas = localStorage.getItem(`ms-paint-shared-${shareId}`)
+    }
+
+    if (sharedCanvas) {
+      // Load shared canvas (don't remove it, so refreshing works)
       const img = new Image()
       img.onload = () => {
         context.drawImage(img, 0, 0)
-        // Save to history after loading
+        // Save to history but NOT to default localStorage (to preserve local work)
         const imageData = context.getImageData(0, 0, canvas.width, canvas.height)
         historyRef.current = [imageData]
         historyIndexRef.current = 0
       }
-      img.src = savedCanvas
+      img.src = sharedCanvas
     } else {
-      // Save initial blank canvas to history
-      const imageData = context.getImageData(0, 0, canvas.width, canvas.height)
-      historyRef.current = [imageData]
-      historyIndexRef.current = 0
+      // Try to load saved canvas from localStorage (user's local work)
+      const savedCanvas = localStorage.getItem('ms-paint-canvas')
+      if (savedCanvas) {
+        const img = new Image()
+        img.onload = () => {
+          context.drawImage(img, 0, 0)
+          // Save to history after loading
+          const imageData = context.getImageData(0, 0, canvas.width, canvas.height)
+          historyRef.current = [imageData]
+          historyIndexRef.current = 0
+        }
+        img.src = savedCanvas
+      } else {
+        // Save initial blank canvas to history
+        const imageData = context.getImageData(0, 0, canvas.width, canvas.height)
+        historyRef.current = [imageData]
+        historyIndexRef.current = 0
+      }
     }
   }, [canvasSize])
 
@@ -822,6 +912,55 @@ function App() {
       context.clearRect(0, 0, context.canvas.width, context.canvas.height)
       saveToHistory()
     }
+  }
+
+  const generateShareLink = () => {
+    const canvas = canvasRef.current
+    if (!canvas) return
+
+    try {
+      // Get canvas as base64 PNG
+      const imageData = canvas.toDataURL('image/png')
+
+      // Generate unique ID for this share
+      const shareId = Date.now().toString(36) + Math.random().toString(36).substring(2, 9)
+
+      // Create share data object with canvas content and dimensions
+      const shareData = {
+        image: imageData,
+        width: canvasSize.width,
+        height: canvasSize.height
+      }
+
+      // Convert to JSON and compress
+      const json = JSON.stringify(shareData)
+      const compressed = compressToEncodedURIComponent(json)
+
+      // Generate shareable URL with unique ID
+      // Use hash fragment instead of query params to avoid 431 errors (fragments aren't sent to server)
+      const baseUrl = window.location.origin + window.location.pathname
+      const fragment = `share=${shareId}&data=${compressed}`
+      const shareableLink = `${baseUrl}#${fragment}`
+
+      // Show the share dialog with the link
+      setShareLink(shareableLink)
+      setLinkCopied(false)
+      setShowShareDialog(true)
+    } catch (error) {
+      console.error('Failed to generate share link:', error)
+      alert('Failed to generate share link. The image might be too large.')
+    }
+  }
+
+  const copyShareLinkToClipboard = () => {
+    navigator.clipboard.writeText(shareLink).then(() => {
+      setLinkCopied(true)
+      setTimeout(() => {
+        setLinkCopied(false)
+      }, 2000)
+    }).catch((err) => {
+      console.error('Failed to copy to clipboard:', err)
+    })
   }
 
   const saveToHistory = () => {
@@ -1425,68 +1564,77 @@ function App() {
           </TitleBar>
 
           <MenuBar>
-            <MenuItemWrapper>
-              <MenuItem $active={openMenu === 'file'} onClick={() => toggleMenu('file')}>
-                File
-              </MenuItem>
-              {openMenu === 'file' && (
-                <DropdownMenu>
-                  <MenuListItem onClick={() => { newImage(); setOpenMenu(null); }}>New</MenuListItem>
-                  <MenuListItem onClick={() => { loadImage(); setOpenMenu(null); }}>Open...</MenuListItem>
-                  <MenuListItem onClick={() => { saveImage(); setOpenMenu(null); }}>Save</MenuListItem>
-                  <MenuListItem onClick={() => { saveImage(); setOpenMenu(null); }}>Save As...</MenuListItem>
-                  <Separator />
-                  <MenuListItem onClick={() => { printImage(); setOpenMenu(null); }}>Print...</MenuListItem>
-                  <Separator />
-                  <MenuListItem onClick={() => { handleClose(); setOpenMenu(null); }}>Exit</MenuListItem>
-                </DropdownMenu>
-              )}
-            </MenuItemWrapper>
+            <MenuItems>
+              <MenuItemWrapper>
+                <MenuItem $active={openMenu === 'file'} onClick={() => toggleMenu('file')}>
+                  File
+                </MenuItem>
+                {openMenu === 'file' && (
+                  <DropdownMenu>
+                    <MenuListItem onClick={() => { newImage(); setOpenMenu(null); }}>New</MenuListItem>
+                    <MenuListItem onClick={() => { loadImage(); setOpenMenu(null); }}>Open...</MenuListItem>
+                    <MenuListItem onClick={() => { saveImage(); setOpenMenu(null); }}>Save</MenuListItem>
+                    <MenuListItem onClick={() => { saveImage(); setOpenMenu(null); }}>Save As...</MenuListItem>
+                    <Separator />
+                    <MenuListItem onClick={() => { printImage(); setOpenMenu(null); }}>Print...</MenuListItem>
+                    <Separator />
+                    <MenuListItem onClick={() => { handleClose(); setOpenMenu(null); }}>Exit</MenuListItem>
+                  </DropdownMenu>
+                )}
+              </MenuItemWrapper>
 
-            <MenuItemWrapper>
-              <MenuItem $active={openMenu === 'edit'} onClick={() => toggleMenu('edit')}>
-                Edit
-              </MenuItem>
-              {openMenu === 'edit' && (
-                <DropdownMenu>
-                  <MenuListItem onClick={() => { undo(); setOpenMenu(null); }}>Undo</MenuListItem>
-                  <MenuListItem onClick={() => { redo(); setOpenMenu(null); }}>Redo</MenuListItem>
-                  <Separator />
-                  <MenuListItem onClick={() => { cutSelection(); setOpenMenu(null); }} disabled={!selection}>Cut</MenuListItem>
-                  <MenuListItem onClick={() => { copySelection(); setOpenMenu(null); }} disabled={!selection}>Copy</MenuListItem>
-                  <MenuListItem onClick={() => { pasteSelection(); setOpenMenu(null); }} disabled={!clipboard}>Paste</MenuListItem>
-                  <MenuListItem onClick={() => { clearSelection(); setOpenMenu(null); }} disabled={!selection}>Clear Selection</MenuListItem>
-                  <MenuListItem onClick={() => { selectAll(); setOpenMenu(null); }}>Select All</MenuListItem>
-                </DropdownMenu>
-              )}
-            </MenuItemWrapper>
+              <MenuItemWrapper>
+                <MenuItem $active={openMenu === 'edit'} onClick={() => toggleMenu('edit')}>
+                  Edit
+                </MenuItem>
+                {openMenu === 'edit' && (
+                  <DropdownMenu>
+                    <MenuListItem onClick={() => { undo(); setOpenMenu(null); }}>Undo</MenuListItem>
+                    <MenuListItem onClick={() => { redo(); setOpenMenu(null); }}>Redo</MenuListItem>
+                    <Separator />
+                    <MenuListItem onClick={() => { cutSelection(); setOpenMenu(null); }} disabled={!selection}>Cut</MenuListItem>
+                    <MenuListItem onClick={() => { copySelection(); setOpenMenu(null); }} disabled={!selection}>Copy</MenuListItem>
+                    <MenuListItem onClick={() => { pasteSelection(); setOpenMenu(null); }} disabled={!clipboard}>Paste</MenuListItem>
+                    <MenuListItem onClick={() => { clearSelection(); setOpenMenu(null); }} disabled={!selection}>Clear Selection</MenuListItem>
+                    <MenuListItem onClick={() => { selectAll(); setOpenMenu(null); }}>Select All</MenuListItem>
+                  </DropdownMenu>
+                )}
+              </MenuItemWrapper>
 
-            <MenuItemWrapper>
-              <MenuItem $active={openMenu === 'image'} onClick={() => toggleMenu('image')}>
-                Image
-              </MenuItem>
-              {openMenu === 'image' && (
-                <DropdownMenu>
-                  <MenuListItem>Flip/Rotate...</MenuListItem>
-                  <MenuListItem>Stretch/Skew...</MenuListItem>
-                  <MenuListItem>Invert Colors</MenuListItem>
-                  <MenuListItem>Attributes...</MenuListItem>
-                  <MenuListItem>Clear Image</MenuListItem>
-                  <MenuListItem>Draw Opaque</MenuListItem>
-                </DropdownMenu>
-              )}
-            </MenuItemWrapper>
+              <MenuItemWrapper>
+                <MenuItem $active={openMenu === 'image'} onClick={() => toggleMenu('image')}>
+                  Image
+                </MenuItem>
+                {openMenu === 'image' && (
+                  <DropdownMenu>
+                    <MenuListItem>Flip/Rotate...</MenuListItem>
+                    <MenuListItem>Stretch/Skew...</MenuListItem>
+                    <MenuListItem>Invert Colors</MenuListItem>
+                    <MenuListItem>Attributes...</MenuListItem>
+                    <MenuListItem>Clear Image</MenuListItem>
+                    <MenuListItem>Draw Opaque</MenuListItem>
+                  </DropdownMenu>
+                )}
+              </MenuItemWrapper>
 
-            <MenuItemWrapper>
-              <MenuItem $active={openMenu === 'about'} onClick={() => toggleMenu('about')}>
-                About
-              </MenuItem>
-              {openMenu === 'about' && (
-                <DropdownMenu>
-                  <MenuListItem onClick={() => { setShowAboutDialog(true); setOpenMenu(null); }}>About Paint</MenuListItem>
-                </DropdownMenu>
-              )}
-            </MenuItemWrapper>
+              <MenuItemWrapper>
+                <MenuItem $active={openMenu === 'about'} onClick={() => toggleMenu('about')}>
+                  About
+                </MenuItem>
+                {openMenu === 'about' && (
+                  <DropdownMenu>
+                    <MenuListItem onClick={() => { setShowAboutDialog(true); setOpenMenu(null); }}>About Paint</MenuListItem>
+                  </DropdownMenu>
+                )}
+              </MenuItemWrapper>
+            </MenuItems>
+
+            <ShareButton
+              onClick={generateShareLink}
+              title="Share this drawing"
+            >
+              🔗 Share
+            </ShareButton>
           </MenuBar>
 
           <MainContent>
@@ -1589,6 +1737,39 @@ function App() {
             </DialogContent>
             <DialogButtons>
               <Button onClick={() => setShowAboutDialog(false)} style={{ minWidth: '80px' }}>
+                OK
+              </Button>
+            </DialogButtons>
+          </DialogWindow>
+        </DialogOverlay>
+      )}
+
+      {showShareDialog && (
+        <DialogOverlay onClick={() => setShowShareDialog(false)}>
+          <DialogWindow onClick={(e) => e.stopPropagation()} style={{ width: '500px' }}>
+            <DialogTitleBar>
+              <span>Share Drawing</span>
+              <CloseButton onClick={() => setShowShareDialog(false)} title="Close">
+                ✕
+              </CloseButton>
+            </DialogTitleBar>
+            <DialogContent style={{ textAlign: 'left' }}>
+              <div>
+                Copy this link to share your drawing:
+              </div>
+              <ShareLinkRow>
+                <ShareLinkInput
+                  value={shareLink}
+                  readOnly
+                  onClick={(e) => (e.target as HTMLInputElement).select()}
+                />
+                <Button onClick={copyShareLinkToClipboard} style={{ minWidth: '70px' }}>
+                  {linkCopied ? 'Copied!' : 'Copy'}
+                </Button>
+              </ShareLinkRow>
+            </DialogContent>
+            <DialogButtons>
+              <Button onClick={() => setShowShareDialog(false)} style={{ minWidth: '80px' }}>
                 OK
               </Button>
             </DialogButtons>
