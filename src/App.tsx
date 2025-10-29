@@ -161,9 +161,9 @@ const MainContent = styled.div`
 `
 
 const ToolPanel = styled(Frame)`
-  width: 60px;
+  width: 72px;
   margin: 4px;
-  padding: 4px;
+  padding: 8px;
   display: flex;
   flex-direction: column;
   gap: 8px;
@@ -187,6 +187,10 @@ const ToolGrid = styled.div`
 const ToolButton = styled.button<{ $selected?: boolean }>`
   width: 24px;
   height: 24px;
+  min-width: 24px;
+  min-height: 24px;
+  max-width: 24px;
+  max-height: 24px;
   padding: 2px;
   display: flex;
   align-items: center;
@@ -194,9 +198,11 @@ const ToolButton = styled.button<{ $selected?: boolean }>`
   font-size: 14px;
   background: #c0c0c0;
   border: none;
+  border-radius: 0;
   outline: none;
   cursor: pointer;
   user-select: none;
+  flex-shrink: 0;
 
   ${({ $selected }) => $selected ? `
     box-shadow: inset -1px -1px #ffffff, inset 1px 1px #0a0a0a, inset -2px -2px #dfdfdf, inset 2px 2px #808080;
@@ -214,11 +220,17 @@ const ToolButton = styled.button<{ $selected?: boolean }>`
 const UndoRedoButton = styled(Button)`
   width: 24px;
   height: 24px;
+  min-width: 24px;
+  min-height: 24px;
+  max-width: 24px;
+  max-height: 24px;
   padding: 2px;
   display: flex;
   align-items: center;
   justify-content: center;
   font-size: 12px;
+  flex-shrink: 0;
+  border-radius: 0;
 `
 
 const CanvasContainer = styled.div`
@@ -291,6 +303,7 @@ const ColorPaletteHeader = styled.div`
   justify-content: space-between;
   align-items: center;
   gap: 8px;
+  flex-wrap: wrap;
 `
 
 const ColorGrid = styled.div`
@@ -335,6 +348,63 @@ const CurrentColorDisplay = styled.div<{ $color: string }>`
   border: 2px solid ${({ theme }) => theme.borderDarkest};
 `
 
+const DialogOverlay = styled.div`
+  position: fixed;
+  top: 0;
+  left: 0;
+  right: 0;
+  bottom: 0;
+  background: rgba(0, 0, 0, 0.3);
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  z-index: 10000;
+`
+
+const DialogWindow = styled.div`
+  width: 300px;
+  background: ${({ theme }) => theme.material};
+  border: 2px solid ${({ theme }) => theme.borderDarkest};
+  box-shadow: ${({ theme }) => theme.boxShadow};
+  display: flex;
+  flex-direction: column;
+`
+
+const DialogTitleBar = styled.div`
+  background: linear-gradient(to right, #000080, #1084d0);
+  color: white;
+  padding: 2px 4px;
+  font-weight: bold;
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+`
+
+const DialogContent = styled.div`
+  padding: 20px;
+  display: flex;
+  flex-direction: column;
+  gap: 12px;
+  text-align: center;
+
+  a {
+    color: #000080;
+    text-decoration: underline;
+    cursor: pointer;
+
+    &:hover {
+      color: #1084d0;
+    }
+  }
+`
+
+const DialogButtons = styled.div`
+  padding: 12px;
+  display: flex;
+  justify-content: center;
+  border-top: 2px solid ${({ theme }) => theme.borderDark};
+`
+
 const colors = [
   // Row 1
   '#000000', '#FFFFFF', '#808080', '#C0C0C0', '#800000', '#FF0000', '#808000', '#FFFF00', '#008000', '#00FF00',
@@ -351,8 +421,7 @@ const tools = [
   { id: 'rectangle', icon: '▭', label: 'Rectangle' },
   { id: 'circle', icon: '○', label: 'Circle' },
   { id: 'star', icon: '★', label: 'Star' },
-  { id: 'picker', icon: '💧', label: 'Color Picker' },
-  { id: 'zoom', icon: '🔍', label: 'Magnifier' },
+  { id: 'eyedropper', icon: '💧', label: 'Eyedropper' },
   { id: 'select', icon: '⬚', label: 'Select' },
 ]
 
@@ -390,6 +459,7 @@ function App() {
   const [isDraggingSelection, setIsDraggingSelection] = useState(false)
   const [selectionImageData, setSelectionImageData] = useState<ImageData | null>(null)
   const [canvasCursor, setCanvasCursor] = useState('crosshair')
+  const [showAboutDialog, setShowAboutDialog] = useState(false)
 
   const canvasRef = useRef<HTMLCanvasElement>(null)
   const selectionCanvasRef = useRef<HTMLCanvasElement>(null)
@@ -835,6 +905,11 @@ function App() {
   const startDrawing = (e: React.MouseEvent<HTMLCanvasElement>) => {
     const pos = getMousePos(e)
 
+    // Don't start drawing if eyedropper is active - it's handled in handleCanvasClick
+    if (activeTool === 'eyedropper') {
+      return
+    }
+
     // Check if clicking inside an existing selection
     if (selection && isPointInSelection(pos.x, pos.y)) {
       // Start dragging the selection
@@ -946,6 +1021,11 @@ function App() {
   const draw = (e: React.MouseEvent<HTMLCanvasElement>) => {
     const pos = getMousePos(e)
     lastPosRef.current = pos
+
+    // Don't draw if eyedropper is active
+    if (activeTool === 'eyedropper') {
+      return
+    }
 
     // Handle dragging selection
     if (isDraggingSelection && selection && startPos && selectionImageData) {
@@ -1191,14 +1271,38 @@ function App() {
   }
 
   const handleCanvasClick = (e: React.MouseEvent<HTMLCanvasElement>) => {
+    const pos = getMousePos(e)
+
+    if (activeTool === 'eyedropper') {
+      const context = contextRef.current
+      if (!context) return
+
+      const imageData = context.getImageData(Math.floor(pos.x), Math.floor(pos.y), 1, 1)
+      const [r, g, b, a] = imageData.data
+
+      // If the pixel is transparent (alpha = 0), treat it as white
+      if (a === 0) {
+        setActiveColor('#ffffff')
+      } else {
+        const hexColor = `#${[r, g, b].map(x => x.toString(16).padStart(2, '0')).join('')}`
+        setActiveColor(hexColor)
+      }
+      return
+    }
+
     if (activeTool === 'fill') {
-      const pos = getMousePos(e)
       floodFill(Math.floor(pos.x), Math.floor(pos.y), activeColor)
       saveToHistory()
     }
   }
 
   const handleCanvasHover = (e: React.MouseEvent<HTMLCanvasElement>) => {
+    // Eyedropper uses crosshair cursor
+    if (activeTool === 'eyedropper') {
+      setCanvasCursor('crosshair')
+      return
+    }
+
     // Update cursor based on whether hovering over selection
     if (selection && !isDrawing && !isDraggingSelection) {
       const pos = getMousePos(e)
@@ -1358,22 +1462,6 @@ function App() {
             </MenuItemWrapper>
 
             <MenuItemWrapper>
-              <MenuItem $active={openMenu === 'view'} onClick={() => toggleMenu('view')}>
-                View
-              </MenuItem>
-              {openMenu === 'view' && (
-                <DropdownMenu>
-                  <MenuListItem>Tool Box</MenuListItem>
-                  <MenuListItem>Color Box</MenuListItem>
-                  <MenuListItem>Status Bar</MenuListItem>
-                  <Separator />
-                  <MenuListItem>Zoom</MenuListItem>
-                  <MenuListItem>View Bitmap</MenuListItem>
-                </DropdownMenu>
-              )}
-            </MenuItemWrapper>
-
-            <MenuItemWrapper>
               <MenuItem $active={openMenu === 'image'} onClick={() => toggleMenu('image')}>
                 Image
               </MenuItem>
@@ -1390,27 +1478,12 @@ function App() {
             </MenuItemWrapper>
 
             <MenuItemWrapper>
-              <MenuItem $active={openMenu === 'options'} onClick={() => toggleMenu('options')}>
-                Options
+              <MenuItem $active={openMenu === 'about'} onClick={() => toggleMenu('about')}>
+                About
               </MenuItem>
-              {openMenu === 'options' && (
+              {openMenu === 'about' && (
                 <DropdownMenu>
-                  <MenuListItem>Edit Colors...</MenuListItem>
-                  <MenuListItem>Get Colors</MenuListItem>
-                  <MenuListItem>Save Colors</MenuListItem>
-                </DropdownMenu>
-              )}
-            </MenuItemWrapper>
-
-            <MenuItemWrapper>
-              <MenuItem $active={openMenu === 'help'} onClick={() => toggleMenu('help')}>
-                Help
-              </MenuItem>
-              {openMenu === 'help' && (
-                <DropdownMenu>
-                  <MenuListItem>Help Topics</MenuListItem>
-                  <Separator />
-                  <MenuListItem>About Paint</MenuListItem>
+                  <MenuListItem onClick={() => { setShowAboutDialog(true); setOpenMenu(null); }}>About Paint</MenuListItem>
                 </DropdownMenu>
               )}
             </MenuItemWrapper>
@@ -1493,6 +1566,35 @@ function App() {
           {!isFullscreen && <ResizeHandle onMouseDown={startResizingWindow} />}
         </WindowContainer>
       </AppContainer>
+
+      {showAboutDialog && (
+        <DialogOverlay onClick={() => setShowAboutDialog(false)}>
+          <DialogWindow onClick={(e) => e.stopPropagation()}>
+            <DialogTitleBar>
+              <span>About Paint</span>
+              <CloseButton onClick={() => setShowAboutDialog(false)} title="Close">
+                ✕
+              </CloseButton>
+            </DialogTitleBar>
+            <DialogContent>
+              <div>
+                <strong>MS Paint Web</strong>
+              </div>
+              <div>
+                A Windows 95 MS Paint clone
+              </div>
+              <div>
+                Created by <a href="https://github.com/ztoben" target="_blank" rel="noopener noreferrer">Zach Toben</a>
+              </div>
+            </DialogContent>
+            <DialogButtons>
+              <Button onClick={() => setShowAboutDialog(false)} style={{ minWidth: '80px' }}>
+                OK
+              </Button>
+            </DialogButtons>
+          </DialogWindow>
+        </DialogOverlay>
+      )}
     </ThemeProvider>
   )
 }
