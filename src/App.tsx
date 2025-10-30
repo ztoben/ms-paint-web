@@ -326,16 +326,15 @@ const ColorPalette = styled(Frame)`
   margin: 4px;
   padding: 8px;
   display: flex;
-  flex-direction: column;
-  gap: 8px;
+  flex-direction: row;
+  gap: 12px;
+  align-items: center;
 `
 
-const ColorPaletteHeader = styled.div`
-  display: flex;
-  justify-content: space-between;
-  align-items: center;
-  gap: 8px;
-  flex-wrap: wrap;
+const ColorPaletteDivider = styled.div`
+  width: 2px;
+  height: 40px;
+  background: ${({ theme }) => theme.borderDark};
 `
 
 const ColorGrid = styled.div`
@@ -356,28 +355,76 @@ const ColorBox = styled.div<{ $color: string; $active?: boolean }>`
   }
 `
 
-const ColorPickerWrapper = styled.div`
+const CustomColorButton = styled(Button)`
+  padding: 4px 8px;
+  font-size: 11px;
+  height: 24px;
+  margin-left: 8px;
+`
+
+const HiddenColorInput = styled.input`
+  position: absolute;
+  opacity: 0;
+  width: 0;
+  height: 0;
+  pointer-events: none;
+`
+
+const ColorSwatchesContainer = styled.div`
   display: flex;
   align-items: center;
-  gap: 4px;
+  justify-content: center;
+  gap: 8px;
+  padding-left: 8px;
 `
 
-const ColorPickerLabel = styled.span`
-  font-size: 11px;
-`
-
-const ColorPickerInput = styled.input`
-  width: 60px;
-  height: 24px;
-  border: 2px solid ${({ theme }) => theme.borderDark};
+const ColorSwatchesWrapper = styled.div`
+  position: relative;
+  width: 36px;
+  height: 36px;
   cursor: pointer;
 `
 
-const CurrentColorDisplay = styled.div<{ $color: string }>`
-  width: 40px;
-  height: 24px;
+const PrimaryColorSwatch = styled.div<{ $color: string }>`
+  position: absolute;
+  top: 0;
+  left: 0;
+  width: 28px;
+  height: 28px;
   background: ${({ $color }) => $color};
   border: 2px solid ${({ theme }) => theme.borderDarkest};
+  z-index: 2;
+`
+
+const SecondaryColorSwatch = styled.div<{ $color: string }>`
+  position: absolute;
+  top: 8px;
+  left: 8px;
+  width: 28px;
+  height: 28px;
+  background: ${({ $color }) => $color};
+  border: 2px solid ${({ theme }) => theme.borderDarkest};
+  z-index: 1;
+`
+
+const SwapColorsButton = styled.button`
+  background: none;
+  border: none;
+  font-size: 16px;
+  color: black;
+  cursor: pointer;
+  padding: 0;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+
+  &:hover {
+    opacity: 0.7;
+  }
+
+  &:active {
+    transform: scale(0.95);
+  }
 `
 
 const DialogOverlay = styled.div`
@@ -473,6 +520,7 @@ function App() {
   const [activeTool, setActiveTool] = useState('pencil')
   const [selectedTool, setSelectedTool] = useState('pencil')
   const [activeColor, setActiveColor] = useState('#000000')
+  const [secondaryColor, setSecondaryColor] = useState('#FFFFFF')
   const [openMenu, setOpenMenu] = useState<string | null>(null)
   const [isDrawing, setIsDrawing] = useState(false)
   const [startPos, setStartPos] = useState<{ x: number; y: number } | null>(null)
@@ -522,6 +570,7 @@ function App() {
   const historyIndexRef = useRef<number>(-1)
   const canvasResizeImageRef = useRef<ImageData | null>(null)
   const preFullscreenStateRef = useRef<{ width: number; height: number; x: number; y: number } | null>(null)
+  const colorInputRef = useRef<HTMLInputElement>(null)
   const lastPosRef = useRef<{ x: number; y: number } | null>(null)
 
   // Animate marching ants for selection
@@ -920,11 +969,17 @@ function App() {
     setOpenMenu(openMenu === menu ? null : menu)
   }
 
+  const swapColors = () => {
+    const temp = activeColor
+    setActiveColor(secondaryColor)
+    setSecondaryColor(temp)
+  }
+
   const saveImage = (saveAs = false) => {
     const canvas = canvasRef.current
     if (!canvas) return
 
-    let downloadFilename = filename === 'untitled' ? 'paint-drawing' : filename
+    const downloadFilename = filename === 'untitled' ? 'paint-drawing' : filename
 
     if (saveAs) {
       // Show Save As dialog
@@ -1803,19 +1858,14 @@ function App() {
           </MainContent>
 
           <ColorPalette variant="outside">
-            <ColorPaletteHeader>
-              <ColorPickerLabel>Colors:</ColorPickerLabel>
-              <ColorPickerWrapper>
-                <CurrentColorDisplay $color={activeColor} />
-                <ColorPickerLabel>Custom:</ColorPickerLabel>
-                <ColorPickerInput
-                  type="color"
-                  value={activeColor}
-                  onChange={(e) => setActiveColor(e.target.value)}
-                  title="Pick custom color"
-                />
-              </ColorPickerWrapper>
-            </ColorPaletteHeader>
+            <ColorSwatchesContainer>
+              <ColorSwatchesWrapper title="Primary/Secondary colors">
+                <PrimaryColorSwatch $color={activeColor} />
+                <SecondaryColorSwatch $color={secondaryColor} />
+              </ColorSwatchesWrapper>
+              <SwapColorsButton onClick={swapColors} title="Swap colors">⇄</SwapColorsButton>
+            </ColorSwatchesContainer>
+            <ColorPaletteDivider />
             <ColorGrid>
               {colors.map(color => (
                 <ColorBox
@@ -1826,6 +1876,15 @@ function App() {
                 />
               ))}
             </ColorGrid>
+            <CustomColorButton onClick={() => colorInputRef.current?.click()} size="sm">
+              Edit Colors...
+            </CustomColorButton>
+            <HiddenColorInput
+              ref={colorInputRef}
+              type="color"
+              value={activeColor}
+              onChange={(e) => setActiveColor(e.target.value.toUpperCase())}
+            />
           </ColorPalette>
           {!isFullscreen && <ResizeHandle onMouseDown={startResizingWindow} />}
         </WindowContainer>
