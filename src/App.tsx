@@ -104,6 +104,19 @@ const TitleBar = styled.div<{ $isFullscreen?: boolean }>`
   justify-content: space-between;
   cursor: ${({ $isFullscreen }) => $isFullscreen ? 'default' : 'move'};
   user-select: none;
+  gap: 4px;
+`
+
+const TitleBarContent = styled.div`
+  display: flex;
+  align-items: center;
+  gap: 4px;
+`
+
+const TitleBarLogo = styled.img`
+  width: 16px;
+  height: 16px;
+  image-rendering: pixelated;
 `
 
 const TitleBarButtons = styled.div`
@@ -495,6 +508,9 @@ function App() {
   const [shareLink, setShareLink] = useState('')
   const [linkCopied, setLinkCopied] = useState(false)
   const [viewportSize, setViewportSize] = useState({ width: window.innerWidth, height: window.innerHeight })
+  const [filename, setFilename] = useState('untitled')
+  const [showSaveAsDialog, setShowSaveAsDialog] = useState(false)
+  const [saveAsFilename, setSaveAsFilename] = useState('')
 
   const canvasRef = useRef<HTMLCanvasElement>(null)
   const selectionCanvasRef = useRef<HTMLCanvasElement>(null)
@@ -904,19 +920,49 @@ function App() {
     setOpenMenu(openMenu === menu ? null : menu)
   }
 
-  const saveImage = () => {
+  const saveImage = (saveAs = false) => {
     const canvas = canvasRef.current
     if (!canvas) return
+
+    let downloadFilename = filename === 'untitled' ? 'paint-drawing' : filename
+
+    if (saveAs) {
+      // Show Save As dialog
+      setSaveAsFilename(downloadFilename)
+      setShowSaveAsDialog(true)
+      return
+    }
+
+    // Direct save without dialog
+    canvas.toBlob((blob) => {
+      if (!blob) return
+      const url = URL.createObjectURL(blob)
+      const link = document.createElement('a')
+      link.href = url
+      link.download = `${downloadFilename}.png`
+      link.click()
+      URL.revokeObjectURL(url)
+    })
+  }
+
+  const handleSaveAsConfirm = () => {
+    const canvas = canvasRef.current
+    if (!canvas || !saveAsFilename.trim()) return
+
+    const downloadFilename = saveAsFilename.replace(/\.png$/i, '') // Remove .png extension if user added it
+    setFilename(downloadFilename)
 
     canvas.toBlob((blob) => {
       if (!blob) return
       const url = URL.createObjectURL(blob)
       const link = document.createElement('a')
       link.href = url
-      link.download = 'paint-drawing.png'
+      link.download = `${downloadFilename}.png`
       link.click()
       URL.revokeObjectURL(url)
     })
+
+    setShowSaveAsDialog(false)
   }
 
   const loadImage = () => {
@@ -926,6 +972,10 @@ function App() {
     input.onchange = (e) => {
       const file = (e.target as HTMLInputElement).files?.[0]
       if (!file) return
+
+      // Extract filename without extension
+      const fileNameWithoutExt = file.name.replace(/\.[^/.]+$/, '')
+      setFilename(fileNameWithoutExt)
 
       const reader = new FileReader()
       reader.onload = (event) => {
@@ -958,6 +1008,7 @@ function App() {
     if (confirmClear) {
       context.clearRect(0, 0, context.canvas.width, context.canvas.height)
       saveToHistory()
+      setFilename('untitled')
     }
   }
 
@@ -1608,7 +1659,10 @@ function App() {
             onMouseDown={startDragging}
             onDoubleClick={toggleFullscreen}
           >
-            <span>untitled - Paint</span>
+            <TitleBarContent>
+              <TitleBarLogo src="/logo.webp" alt="Paint" />
+              <span>{filename} - Paint</span>
+            </TitleBarContent>
             <TitleBarButtons>
               <MaximizeButton
                 onClick={(e) => { e.stopPropagation(); toggleFullscreen(); }}
@@ -1635,8 +1689,8 @@ function App() {
                   <DropdownMenu>
                     <MenuListItem onClick={() => { newImage(); setOpenMenu(null); }}>New</MenuListItem>
                     <MenuListItem onClick={() => { loadImage(); setOpenMenu(null); }}>Open...</MenuListItem>
-                    <MenuListItem onClick={() => { saveImage(); setOpenMenu(null); }}>Save</MenuListItem>
-                    <MenuListItem onClick={() => { saveImage(); setOpenMenu(null); }}>Save As...</MenuListItem>
+                    <MenuListItem onClick={() => { saveImage(false); setOpenMenu(null); }}>Save</MenuListItem>
+                    <MenuListItem onClick={() => { saveImage(true); setOpenMenu(null); }}>Save As...</MenuListItem>
                     <Separator />
                     <MenuListItem onClick={() => { printImage(); setOpenMenu(null); }}>Print...</MenuListItem>
                     <Separator />
@@ -1787,11 +1841,12 @@ function App() {
               </CloseButton>
             </DialogTitleBar>
             <DialogContent>
-              <div>
-                <strong>MS Paint Web</strong>
-              </div>
-              <div>
-                A Windows 95 MS Paint inspired app
+              <div style={{ display: 'flex', alignItems: 'center', gap: '12px', marginBottom: '12px' }}>
+                <img src="/logo.webp" alt="MS Paint Web" style={{ width: '48px', height: '48px', imageRendering: 'pixelated' }} />
+                <div>
+                  <div><strong>MS Paint Web</strong></div>
+                  <div style={{ fontSize: '11px', marginTop: '4px' }}>A Windows 95 MS Paint inspired app</div>
+                </div>
               </div>
               <div>
                 Created by <a href="https://github.com/ztoben" target="_blank" rel="noopener noreferrer">Zach Toben</a>
@@ -1833,6 +1888,51 @@ function App() {
             <DialogButtons>
               <Button onClick={() => setShowShareDialog(false)} style={{ minWidth: '80px' }}>
                 OK
+              </Button>
+            </DialogButtons>
+          </DialogWindow>
+        </DialogOverlay>
+      )}
+
+      {showSaveAsDialog && (
+        <DialogOverlay onClick={() => setShowSaveAsDialog(false)}>
+          <DialogWindow onClick={(e) => e.stopPropagation()} style={{ width: '400px' }}>
+            <DialogTitleBar>
+              <span>Save As</span>
+              <CloseButton onClick={() => setShowSaveAsDialog(false)} title="Close">
+                ✕
+              </CloseButton>
+            </DialogTitleBar>
+            <DialogContent style={{ textAlign: 'left' }}>
+              <div style={{ marginBottom: '8px' }}>
+                <label htmlFor="save-filename" style={{ display: 'block', marginBottom: '4px' }}>
+                  File name:
+                </label>
+                <TextInput
+                  id="save-filename"
+                  value={saveAsFilename}
+                  onChange={(e) => setSaveAsFilename(e.target.value)}
+                  onKeyDown={(e) => {
+                    if (e.key === 'Enter') {
+                      handleSaveAsConfirm()
+                    } else if (e.key === 'Escape') {
+                      setShowSaveAsDialog(false)
+                    }
+                  }}
+                  style={{ width: '100%' }}
+                  autoFocus
+                />
+              </div>
+              <div style={{ fontSize: '11px', color: '#666' }}>
+                Save as type: PNG (*.png)
+              </div>
+            </DialogContent>
+            <DialogButtons style={{ gap: '8px' }}>
+              <Button onClick={handleSaveAsConfirm} style={{ minWidth: '80px' }}>
+                Save
+              </Button>
+              <Button onClick={() => setShowSaveAsDialog(false)} style={{ minWidth: '80px' }}>
+                Cancel
               </Button>
             </DialogButtons>
           </DialogWindow>
