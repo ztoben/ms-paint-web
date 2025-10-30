@@ -1,12 +1,12 @@
 # MS Paint Web
 
-A Windows 95 MS Paint clone built with React, featuring authentic retro styling and classic painting functionality.
+A Windows 95 MS Paint inspired app built with React, featuring authentic retro styling and classic painting functionality.
 
 ![MS Paint Web](https://img.shields.io/badge/React-19.1.1-blue) ![TypeScript](https://img.shields.io/badge/TypeScript-5.9.3-blue) ![React95](https://img.shields.io/badge/React95-4.0.0-teal)
 
 ## Live Demo
 
-[https://ztoben.github.io/ms-paint-web/](https://ztoben.github.io/ms-paint-web/)
+Deployed on Vercel with URL shortening backend
 
 ## Features
 
@@ -54,6 +54,11 @@ A Windows 95 MS Paint clone built with React, featuring authentic retro styling 
 - **LocalStorage** - Saves window position, size, and canvas contents
 - **Auto-restore** - Automatically restores your last session
 
+### Sharing
+- **Share button** - Generate short URLs to share your drawings
+- **URL shortening** - Built-in backend service creates short, shareable links
+- **Persistent storage** - Shared links expire after 30 days
+
 ### Keyboard Shortcuts
 - `Ctrl+Z` - Undo
 - `Ctrl+Y` or `Ctrl+Shift+Z` - Redo
@@ -65,12 +70,19 @@ A Windows 95 MS Paint clone built with React, featuring authentic retro styling 
 
 ## Tech Stack
 
+### Frontend
 - **React 19.1.1** - UI framework
 - **TypeScript 5.9.3** - Type safety
 - **Vite 7.1.14** - Build tool (using Rolldown)
 - **React95 4.0.0** - Windows 95 UI components
 - **Styled Components 6.1.19** - CSS-in-JS styling
 - **HTML5 Canvas API** - Drawing functionality
+- **lz-string** - URL compression
+
+### Backend
+- **Vercel Serverless Functions** - API endpoints
+- **Redis** - URL storage with 30-day expiration (via Vercel Marketplace)
+- **TypeScript** - Type-safe serverless functions
 
 ## Development
 
@@ -108,26 +120,57 @@ npm run lint
 
 ## Deployment
 
-This project automatically deploys to GitHub Pages on every push to the `main` branch using GitHub Actions.
+This project is deployed on Vercel with automatic deployments on every push to `main`.
 
-### Workflow
-1. Push changes to `main` branch
-2. GitHub Action builds the project
-3. Deploys to GitHub Pages
-4. Available at https://ztoben.github.io/ms-paint-web/
+### Vercel Setup
+
+1. **Install Vercel CLI** (optional, for local development)
+   ```bash
+   npm install -g vercel
+   ```
+
+2. **Link Project to Vercel**
+   ```bash
+   vercel link
+   ```
+
+3. **Create Redis Database**
+   - Go to Vercel Dashboard → Storage → Create Database
+   - Select "Redis"
+   - Name it (e.g., `ms-paint-urls`)
+   - Connect to your project
+   - Environment variable `REDIS_URL` is auto-configured
+
+4. **Deploy**
+   - Push to `main` branch for automatic deployment
+   - Or manually deploy: `vercel --prod`
+
+### Local Development with Vercel Functions
+
+```bash
+vercel dev
+```
+
+This starts both the Vite dev server and simulates Vercel serverless functions locally.
+
+### Environment Variables
+
+Redis automatically sets this when you connect the database via Vercel Marketplace:
+- `REDIS_URL` - Redis connection string (e.g., `redis://default:password@host:port`)
 
 ## Project Structure
 
 ```
 ms-paint-web/
+├── api/                 # Vercel serverless functions
+│   ├── shorten.ts       # POST /api/shorten - create short URL
+│   └── [id].ts          # GET /[id] - redirect to long URL
 ├── src/
 │   ├── App.tsx          # Main application component
 │   ├── main.tsx         # React entry point
 │   └── index.css        # Global styles
 ├── public/              # Static assets
-├── .github/
-│   └── workflows/
-│       └── deploy.yml   # GitHub Pages deployment
+├── vercel.json          # Vercel configuration
 ├── vite.config.ts       # Vite configuration
 └── package.json         # Dependencies
 ```

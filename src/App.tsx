@@ -215,6 +215,7 @@ const ToolButton = styled.button<{ $selected?: boolean }>`
   justify-content: center;
   font-size: 14px;
   background: #c0c0c0;
+  color: black;
   border: none;
   border-radius: 0;
   outline: none;
@@ -493,6 +494,7 @@ function App() {
   const [showShareDialog, setShowShareDialog] = useState(false)
   const [shareLink, setShareLink] = useState('')
   const [linkCopied, setLinkCopied] = useState(false)
+  const [viewportSize, setViewportSize] = useState({ width: window.innerWidth, height: window.innerHeight })
 
   const canvasRef = useRef<HTMLCanvasElement>(null)
   const selectionCanvasRef = useRef<HTMLCanvasElement>(null)
@@ -646,6 +648,51 @@ function App() {
   useEffect(() => {
     localStorage.setItem('ms-paint-window-pos', JSON.stringify(windowPos))
   }, [windowPos])
+
+  // Handle viewport resize to maintain main window relative position and fit within bounds
+  useEffect(() => {
+    const handleResize = () => {
+      const newWidth = window.innerWidth
+      const newHeight = window.innerHeight
+
+      // Check if window size needs to be constrained to fit in viewport
+      let newWindowWidth = windowSize.width
+      let newWindowHeight = windowSize.height
+      let needsResize = false
+
+      // Constrain window size if it exceeds viewport (leave some padding)
+      const maxWidth = newWidth - 40 // 40px total padding
+      const maxHeight = newHeight - 40
+      const minSize = 250 // Minimum window size
+
+      if (newWindowWidth > maxWidth) {
+        newWindowWidth = Math.max(minSize, maxWidth)
+        needsResize = true
+      }
+
+      if (newWindowHeight > maxHeight) {
+        newWindowHeight = Math.max(minSize, maxHeight)
+        needsResize = true
+      }
+
+      // Calculate relative positions as percentages for the main window
+      const relativeX = windowPos.x / viewportSize.width
+      const relativeY = windowPos.y / viewportSize.height
+
+      // Apply new position maintaining relative coordinates
+      const newX = Math.max(0, Math.min(newWidth - newWindowWidth, relativeX * newWidth))
+      const newY = Math.max(0, Math.min(newHeight - newWindowHeight, relativeY * newHeight))
+
+      if (needsResize) {
+        setWindowSize({ width: newWindowWidth, height: newWindowHeight })
+      }
+      setWindowPos({ x: newX, y: newY })
+      setViewportSize({ width: newWidth, height: newHeight })
+    }
+
+    window.addEventListener('resize', handleResize)
+    return () => window.removeEventListener('resize', handleResize)
+  }, [windowPos, windowSize, viewportSize])
 
 
   useEffect(() => {
@@ -914,7 +961,7 @@ function App() {
     }
   }
 
-  const generateShareLink = () => {
+  const generateShareLink = async () => {
     const canvas = canvasRef.current
     if (!canvas) return
 
@@ -936,19 +983,34 @@ function App() {
       const json = JSON.stringify(shareData)
       const compressed = compressToEncodedURIComponent(json)
 
-      // Generate shareable URL with unique ID
-      // Use hash fragment instead of query params to avoid 431 errors (fragments aren't sent to server)
+      // Create the full URL with hash fragment
       const baseUrl = window.location.origin + window.location.pathname
       const fragment = `share=${shareId}&data=${compressed}`
-      const shareableLink = `${baseUrl}#${fragment}`
+      const longUrl = `${baseUrl}#${fragment}`
 
-      // Show the share dialog with the link
-      setShareLink(shareableLink)
+      // Call our API to create a short URL
+      const response = await fetch('/api/shorten', {
+        method: 'POST',
+        headers: {
+          'Content-Type': 'application/json',
+        },
+        body: JSON.stringify({ url: longUrl }),
+      })
+
+      if (!response.ok) {
+        throw new Error('Failed to create short URL')
+      }
+
+      const data = await response.json()
+      const shortUrl = `${window.location.protocol}//${data.shortUrl}`
+
+      // Show the share dialog with the short link
+      setShareLink(shortUrl)
       setLinkCopied(false)
       setShowShareDialog(true)
     } catch (error) {
       console.error('Failed to generate share link:', error)
-      alert('Failed to generate share link. The image might be too large.')
+      alert('Failed to generate share link. Please try again.')
     }
   }
 
@@ -1729,7 +1791,7 @@ function App() {
                 <strong>MS Paint Web</strong>
               </div>
               <div>
-                A Windows 95 MS Paint clone
+                A Windows 95 MS Paint inspired app
               </div>
               <div>
                 Created by <a href="https://github.com/ztoben" target="_blank" rel="noopener noreferrer">Zach Toben</a>
